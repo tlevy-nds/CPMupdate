@@ -1,0 +1,1 @@
+function generate_examples(obj, X)

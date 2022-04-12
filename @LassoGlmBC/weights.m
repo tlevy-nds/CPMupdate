@@ -1,0 +1,9 @@
+function w = weights(obj)
+
+% lp = B0 + B1 * x1 + B2 * x2 + ...
+%    = B0' + B1' * (x1 - u1) / s1 + B2' * (x2 - u2) / s2 + ...
+%    = (B0' - B1' * u1 / s1 - B2' * u2 / s2 - ...) + (B1' / s1) * x1 + (B2' / s2) * x2 + ...
+% B = B'/s
+% B' = B * s
+
+w = obj.betaOverall * obj.mdl.thetahat{1}(2:end) .* reshape(obj.mdl.std, size(obj.mdl.thetahat{1}(2:end)));
