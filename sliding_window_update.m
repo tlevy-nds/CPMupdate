@@ -578,7 +578,7 @@ pdl = NaN(length(updateMethods), length(updateMethods));
 for ium = 1:length(updateMethods)
     for ium2 = setdiff(1:length(updateMethods), ium)
         try
-            pdl(ium, ium2) = perf(ium).deLong(perf(ium2));
+            % pdl(ium, ium2) = perf(ium).deLong(perf(ium2));
         catch
             % This can happen if the in NaNs cause me to remove indicies
             % and the results are no longer pairwise
@@ -586,7 +586,7 @@ for ium = 1:length(updateMethods)
         end
     end
 end
-save(sprintf('%s\\pDeLong_%s_%d.mat', figdir, modelType, horizon), 'pdl');
+% save(sprintf('%s\\pDeLong_%s_%d.mat', figdir, modelType, horizon), 'pdl');
 
 % add pdl to legend
 % um2 = arrayfun(@(x) sprintf('%s (p = %1.3f)', strrep(updateMethods{x+1}, '_', ' '), pdl(x)), ...
