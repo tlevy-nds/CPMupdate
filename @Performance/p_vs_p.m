@@ -1,4 +1,4 @@
-function [r2, m, b, Eavg, E90, citl, brierScore, EavgCI] = p_vs_p(obj, mystride, useBarPlot, valset, horizonDays, nImputations, plotflag)
+function [r2, m, b, Eavg_, E90, citl, brierScore, EavgCI] = p_vs_p(obj, mystride, useBarPlot, valset, horizonDays, nImputations, plotflag)
 
 if isempty(obj.P)
     fprintf(1, 'P not set\n');
@@ -143,7 +143,9 @@ if plotflag
             x2(ii) = mean(x(inds));
             y2(ii) = mean(y(inds));
         end
-        figure();ax = gca();plot(ax, min(1.00, max(0.0, x2)), y2, '.', 'MarkerSize', 18);
+        figure();ax = gca();plot(ax, min(1.00, max(0.0, x2)), y2, '.', 'MarkerSize', 18);        
+        % Lowess smoothing
+        % hold(ax, 'on');plot(ax, min(1.00, max(0.0, x)), y, '-');hold(ax, 'off');
         
         xlabel(ax, 'P_N_O_C_O_S');ylabel(ax, 'Actual Proportion');
         % figure;plot((mybins)+mystride/2, P2);
@@ -197,3 +199,5 @@ if plotflag
         mean(Eavg_, 'omitnan'), quantile(Eavg_, 0.025), quantile(Eavg_, 0.975) ...
         ), 'EdgeColor', [0 0 0]);
 end
+
+r2 = [mean(Eavg_, 'omitnan'), (0.5 * (quantile(Eavg_, 0.975) - quantile(Eavg_, 0.025)) / norminv(1 - 0.05/2, 0, 1)) ^ 2, length(Eavg_)];

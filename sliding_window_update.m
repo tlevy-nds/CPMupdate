@@ -21,14 +21,13 @@ origPredictors = {'Age' 'Blood_Urea_Nitrogen_Serum' 'Red_Cell_Distrib_Width' 'SP
 useOriginalPredictors = false;
 unbiased = true;  % unbiased true retrains the Nocos model a second time after feature selection
 % multipleImputations = false;
-numImputations = 5;
 alwaysUpdate = false;
 generateReport = true;
 
-if horizon == 7
-    chosenUpdateMethod = 'logistic_recalibration';
-elseif horizon == 28
-    chosenUpdateMethod = 'reestimation';
+if isequal(modelType, 'xgboost')
+    chosenUpdateMethod = 'update_intercept';
+else
+    chosenUpdateMethod = 'logsitic_recalibration';
 end
 
 % update window settings
@@ -48,6 +47,9 @@ myColors = myColors([2 3 4 1 5 6 7], :);
 updateMethods = [{'no updates'} BinaryClassifier.updateMethods];  % TODO verify reestimation methods
 lineWidths = [6 4 2 2 2 2 2];
 
+% If setting to true, also draw Lowess smoothed plot in Performance > p_vs_p
+plotVariantGenderRaceEth = false;  % for variant, gender, race/ethnicity sensitivity analysis
+
 saveMdl = false;  % For Lucas
 
 %% Load the data and train the initial model
@@ -55,14 +57,33 @@ saveMdl = false;  % For Lucas
 if ~exist('X', 'var') || ~exist('y2', 'var')    
     % X already has the exclusion criteria, TODO has a single imputation
     % load(sprintf('X%d.mat', horizon), 'Xmi', 'y2', 'predictorNames', 'admitDtm', 'finalHospital');
-    load(sprintf('X_12132021_%d_cvguid.mat', horizon), 'Xmi', 'y2', 'predictorNames', 'admitDtm', 'cvguid', 'finalHospital');
+    % load(sprintf('X_12132021_%d_cvguid.mat', horizon), 'Xmi', 'y2', 'predictorNames', 'admitDtm', 'cvguid', 'finalHospital');
+    load('X_05012022.mat', 'Xmi', 'outcome7', 'outcome28', 'admitDtm', 'cvguid', 'finalHospital');
+    if horizon == 7
+        y2 = outcome7;
+    elseif horizon == 28
+        y2 = outcome28;
+    end
     % admitDtm is corrected, and X and y2 are sorted and indexed
     if length(y2) == length(Xmi) * size(Xmi{1}, 1)
         y2 = reshape(y2, 5, [])';
         y2 = y2(:, 1);
     end
     assert(issorted(admitDtm));
+
+    for ii = 1:length(Xmi)
+        if ~ismember('eGFR', Xmi{ii}.Properties.VariableNames)
+            eGFR = zeros(size(Xmi{ii}, 1), 1);
+            eGFR(logical(Xmi{ii}.Race_Black)) = Xmi{ii}.eGFR_if_African_American(logical(Xmi{ii}.Race_Black));
+            eGFR(~logical(Xmi{ii}.Race_Black)) = Xmi{ii}.eGFR_if_Non_African_American(~logical(Xmi{ii}.Race_Black));
+            Xmi{ii} = addvars(Xmi{ii}, eGFR, 'NewVariableNames', {'eGFR'});
+            Xmi{ii}.eGFR_if_African_American = [];
+            Xmi{ii}.eGFR_if_Non_African_American = [];            
+        end
+    end
 end
+
+numImputations = length(Xmi);
 
 % if multipleImputations
 %     numImputations = length(Xmi);
@@ -81,7 +102,32 @@ end
 %     X = Xmi{1};
 % end
 
-devInds = admitDtm < devDate & finalHospital ~= 'LIJ';
+devInds = admitDtm < devDate & finalHospital ~= leaveoutHospital;
+
+% ------- variants, gender, race/ethnicity -------
+if plotVariantGenderRaceEth
+    variants = {'alpha', 'delta', 'omicron'};
+    genders = {'male', 'female'};
+    raceEths = {'White' 'Black' 'Asian' 'Hispanic or Latino' 'Other'};
+
+    alphaInds = admitDtm > devDate & admitDtm < datetime(2021, 6, 15);
+    deltaInds = admitDtm > datetime(2021, 6, 15) & admitDtm < datetime(2021, 12, 15);
+    omicronInds = admitDtm > datetime(2021, 12, 15) & admitDtm < datetime(2022, 5, 1);
+    varIndsMap = containers.Map(variants, {alphaInds, deltaInds, omicronInds});
+
+    maleInds = logical(X.Gender_Male);
+    femaleInds = ~maleInds;
+    genderIndsMap = containers.Map(genders, {maleInds, femaleInds});
+
+    whiteInds = logical(X.Race_White) & ~logical(X.("Ethnicity_Hispanic or Latino"));
+    blackInds = logical(X.Race_Black);
+    % dummytable removes the first category since it is determined by the absense of all other categories
+    asianInds = ~logical(X.Race_Black) & ~logical(X.Race_White) & ~logical(X.Race_Unknown) & ~logical(X.Race_Declined) & ~logical(X.Race_Other);
+    hispanicLatinoInds = logical(X.("Ethnicity_Hispanic or Latino")) & ~asianInds & ~blackInds;
+    otherInds = ~asianInds & ~blackInds & ~whiteInds & ~hispanicLatinoInds;
+    raceEthIndsMap = containers.Map(raceEths, {whiteInds, blackInds, asianInds, hispanicLatinoInds, otherInds});
+end
+% ------------------------------------------------
 
 % instantiate the model
 switch modelType
@@ -134,6 +180,17 @@ hFigRoc = figure(); ax3 = gca(); xlabel(ax3, '1 - Specificity'); ylabel(ax3, 'Se
 hFigPR = figure(); ax4 = gca(); xlabel(ax4, 'Recall'); ylabel(ax4, 'Precision'); title(ax4, 'PR Curves'); grid('on');
 hFigNB = figure(); ax5 = gca(); title(ax5, sprintf('%d-day NB', horizon));
 
+% ------- variants, gender, race/ethnicity -------
+if plotVariantGenderRaceEth
+    hFigRocVar = figure(); axRocVar = gca(); hold(axRocVar, 'on');
+    hFigPrVar = figure(); axPrVar = gca(); hold(axPrVar, 'on');
+    hFigRocGender = figure(); axRocGender = gca(); hold(axRocGender, 'on');
+    hFigPrGender = figure(); axPrGender = gca(); hold(axPrGender, 'on');
+    hFigRocRaceEth = figure(); axRocRaceEth = gca(); hold(axRocRaceEth, 'on');
+    hFigPrRaceEth = figure(); axPrRaceEth = gca(); hold(axPrRaceEth, 'on');
+end
+% ------------------------------------------------
+
 figdir = sprintf('figs\\%dday\\%s', horizon, modelType);
 if ~isfolder(figdir)
     mkdir(figdir);
@@ -167,7 +224,7 @@ if generateReport && ~exist('slides', 'var')
 end
 
 %% Retrospective Validation
-retroInds = admitDtm < devDate & finalHospital == 'LIJ';
+retroInds = admitDtm < devDate & finalHospital == leaveoutHospital;
 Xretro = X(retroInds, :);
 yretro = y2(retroInds);
 
@@ -191,6 +248,17 @@ saveas(hCalRetro, sprintf('%s\\cal_%s_%d_%s.fig', figdir, modelType, horizon, 'r
 
 perf.net_benefit(hFigNB, updateMethod, col, true);
 
+if length(leaveoutHospitals) > 1
+    dnroc = get(findobj(ax3, 'Type', 'Line'), 'DisplayName');
+    dnpr = get(findobj(ax4, 'Type', 'Line'), 'DisplayName');
+    strCal = get(findobj(hCalRetro, 'Type', 'Text'), 'String');
+
+    temp = strsplit(dnroc, '='); aurocvals(iloh, :, ihorizon, imodeltype) = str2num(temp{2});
+    temp = strsplit(dnpr, '='); auprvals(iloh, :, ihorizon, imodeltype) = str2num(temp{2});
+    temp = strsplit(strCal, '='); icivals(iloh, :, ihorizon, imodeltype) = str2num(temp{2});
+    return
+end
+
 %% Dynamic updating
 % window lengths
 [nFlr, nIo] = get_min_sample_size(y2, 1);
@@ -212,6 +280,7 @@ xvals = reshape(repmat(1:length(myInds), [2 1]), [], 1);
 xvals = stride * (xvals - 1);
 
 perf = arrayfun(@(x) Performance(), 1:length(updateMethods));
+% for iupdateMethod = find(ismember(updateMethods, {'no updates', chosenUpdateMethod}))
 for iupdateMethod = 1:length(updateMethods)
     updateMethod = updateMethods{iupdateMethod};
     windowlen = windowlenghts(iupdateMethod);
@@ -228,6 +297,7 @@ for iupdateMethod = 1:length(updateMethods)
     [allPs, allys, allcvguidimps] = deal([]);
     w = [];
     predNames = [];
+    keepInds = [];
     for ii = 1:length(myInds)
         myInd = myInds(ii);
         
@@ -289,6 +359,9 @@ for iupdateMethod = 1:length(updateMethods)
             mycvguids(max(1, end - stride + 1):end), myimps(max(1, end - stride + 1):end)];
 
         allys = [allys; yc2(max(1, end - stride + 1):end)]; 
+
+        temp = inds(inds_);
+        keepInds = [keepInds, temp(max(1, end - stride + 1):end)];
         
         % decide to update based on most up-to-date model
         if ~isequal(updateMethod, 'no updates') && ...
@@ -362,6 +435,121 @@ for iupdateMethod = 1:length(updateMethods)
     title(strrep(updateMethod, '_', ' '));
     hCal = gcf();
     saveas(hCal, sprintf('%s\\cal_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+
+    % TODO ROC/PR/Cal for each variant
+    % ------- variants, gender, race/ethnicity -------
+    if plotVariantGenderRaceEth        
+        % each model type can potentially have a different preferred updating method
+        % only plot the results for nocos
+        if ismember(modelType, {'nocos', 'LR'}) && ismember(updateMethod, {'no updates', 'logistic_recalibration'}) || ...
+            ismember(modelType, {'xgboost'}) && ismember(updateMethod, {'no updates', 'update_intercept'})
+            eavgs = [];
+            [meanVarNauroc, meanVarNaupr, meanVarNici] = deal(zeros(length(variants), 3));
+            for ivar = 1:length(variants)
+                variant = variants{ivar};
+                varInds = varIndsMap(variant);
+                varInds_ = varInds(keepInds);
+                [meanVarNauroc(ivar, :)] = plot_roc(axRocVar, allPs(varInds_), allys(varInds_), myColors(ivar, :), variant);
+                [meanVarNaupr(ivar, :)] = plot_pr(axPrVar, allPs(varInds_), allys(varInds_), myColors(ivar, :), variant); ylim(axPrVar, [0.75 1]);
+
+                perf_ = Performance();
+                perf_.init(allPs(varInds_), allys(varInds_), allPs(varInds_), true, allcvguidimps(varInds_));
+                [meanVarNici(ivar, :), ~, ~, Eavg_] = perf_.p_vs_p(0.1, false, '', horizon, numImputations);
+                title(variant);
+                hFigVarCal = gcf();
+                saveas(hFigVarCal, sprintf('%s\\cal_%s_%d_%s_%s.fig', figdir, modelType, horizon, variant, updateMethod));
+
+                % I think these are normally distributed
+                eavgs = [eavgs; Eavg_, ivar + zeros(length(Eavg_), 1)];
+            end
+            saveas(hFigRocVar, sprintf('%s\\roc_variants_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+            saveas(hFigPrVar, sprintf('%s\\pr_variants_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));            
+            
+            % groupVariants = onehotdecode([alphaInds deltaInds omicronInds], ["alpha" "delta" "omicron"], 1);            
+            [pVariantIci, tblVariantIci, statsVariantIci] = anova1(eavgs(:, 1), categorical(eavgs(:, 2), 1:length(variants), variants));
+            title(gca(), sprintf('%s %s %d %f', modelType, updateMethod, horizon, pVariantIci));
+            saveas(gca(), sprintf('%s\\anova_boxplots_variants_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+            % [hVariantAuroc2, pVariantAuroc2] = anova1ss(meanVarNauroc(:, 1), meanVarNauroc(:, 2), meanVarNauroc(:, 3));
+            % [hVariantAupr2, pVariantAupr2] = anova1ss(meanVarNaupr(:, 1), meanVarNaupr(:, 2), meanVarNaupr(:, 3));
+            % [hVariantIci2, pVariantIci2] = anova1ss(meanVarNici(:, 1), meanVarNici(:, 2), meanVarNici(:, 3));
+
+            % TODO if I did this for AUROC and logit(AUPR) what
+            % would N be? Would it be the number of samples in the group?
+            % All samples are required to compute the metric. But intrinsically my calculations use that n.
+            % The Hanley and MacNeil SE scales as sqrt(n) so I assume use the number of samples
+
+            % I have the 95% confidence intervals for the AUROC, AUPR, and ICI
+            % ICI was the only one I did bootstrapping for. Do I have to
+            % ignore my analytically computed confidence intervals and
+            % perform bootstrapping for AUROC and AUPR too to run ANOVA?            
+            
+            % invlogit = @(x) exp(x) ./ (1 + exp(x));
+            % logit = @(x) log(x ./ (1 - x));
+
+            % I could do 3-way ANOVA to compare White Alpha Males
+            % multcompare.m is pairwise.
+
+            % One-way ANOVA from summary data
+            % https://statpages.info/anova1sm.html
+            % https://www.mathworks.com/matlabcentral/fileexchange/41036-n-way-anova-from-summary-statistics
+            % maybe I can implement it from this https://www.originlab.com/doc/Origin-Help/OneWayANOVA-Algorithm
+
+            % here's a paper that compares AUCs, but it doesn't make the comparison between races, only across models
+            % https://www.ahajournals.org/doi/10.1161/JAHA.118.010471
+
+            eavgs = [];
+            for igender = 1:length(genders)
+                gender = genders{igender};
+                genderInds = genderIndsMap(gender);
+                genderInds_ = genderInds(keepInds);
+                plot_roc(axRocGender, allPs(genderInds_), allys(genderInds_), myColors(igender, :), gender);
+                plot_pr(axPrGender, allPs(genderInds_), allys(genderInds_), myColors(igender, :), gender); ylim(axPrGender, [0.75 1]);
+
+                perf_ = Performance();
+                perf_.init(allPs(genderInds_), allys(genderInds_), allPs(genderInds_), true, allcvguidimps(genderInds_));
+                [~, ~, ~, Eavg_] = perf_.p_vs_p(0.1, false, '', horizon, numImputations);
+                title(gender);
+                hFigGenderCal = gcf();
+                saveas(hFigGenderCal, sprintf('%s\\cal_%s_%d_%s_%s.fig', figdir, modelType, horizon, gender, updateMethod));
+
+                eavgs = [eavgs; Eavg_, igender + zeros(length(Eavg_), 1)];
+            end
+            saveas(hFigRocGender, sprintf('%s\\roc_gender_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+            saveas(hFigPrGender, sprintf('%s\\pr_gender_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+            % groupGenders = onehotdecode([maleInds femaleInds], ["male" "female"], 1);
+            % [pGender, tblGender, statsGender] = anova1(allPs(keepInds) - allys(keepInds), groupGenders(keepInds));
+            [pGenderIci, tblGenderIci, statsGenderIci] = anova1(eavgs(:, 1), categorical(eavgs(:, 2), 1:length(genders), genders));
+            title(gca(), sprintf('%s %s %d %f', modelType, updateMethod, horizon, pGenderIci));
+            saveas(gca(), sprintf('%s\\anova_boxplots_gender_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+            
+
+            eavgs = [];
+            for ire = 1:length(raceEths)
+                raceEth = raceEths{ire};
+                raceEthInds = raceEthIndsMap(raceEth);
+                raceEthInds_ = raceEthInds(keepInds);
+                plot_roc(axRocRaceEth, allPs(raceEthInds_), allys(raceEthInds_), myColors(ire, :), raceEth);
+                plot_pr(axPrRaceEth, allPs(raceEthInds_), allys(raceEthInds_), myColors(ire, :), raceEth); ylim(axPrRaceEth, [0.75 1]);
+
+                perf_ = Performance();
+                perf_.init(allPs(raceEthInds_), allys(raceEthInds_), allPs(raceEthInds_), true, allcvguidimps(raceEthInds_));
+                [~, ~, ~, Eavg_] = perf_.p_vs_p(0.1, false, '', horizon, numImputations);
+                title(raceEth);
+                hFigRaceEthCal = gcf();
+                saveas(hFigRaceEthCal, sprintf('%s\\cal_%s_%d_%s_%s.fig', figdir, modelType, horizon, raceEth, updateMethod));
+
+                eavgs = [eavgs; Eavg_, ire + zeros(length(Eavg_), 1)];
+            end
+            saveas(hFigRocRaceEth, sprintf('%s\\roc_raceEth_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+            saveas(hFigPrRaceEth, sprintf('%s\\pr_raceEth_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+            % groupRaceEth = onehotdecode([whiteInds blackInds asianInds hispanicLatinoInds otherInds], ["White" "Black" "Asian" "Hispanic or Latino" "Other"], 1);
+            % [pRaceEth, tblRaceEth, statsRaceEth] = anova1(allPs(keepInds) - allys(keepInds), groupRaceEth(keepInds));
+            [pRaceEthIci, tblRaceEthIci, statsRaceEthIci] = anova1(eavgs(:, 1), categorical(eavgs(:, 2), 1:length(raceEths), raceEths));
+            title(gca(), sprintf('%s %s %d %f', modelType, updateMethod, horizon, pRaceEthIci));
+            saveas(gca(), sprintf('%s\\anova_boxplots_raceEth_%s_%d_%s.fig', figdir, modelType, horizon, updateMethod));
+        end        
+    end
+    % ------------------------------------------------
     
     perf(iupdateMethod).net_benefit(hFigNB, updateMethod, myColors(iupdateMethod, :), iupdateMethod == 1); 
     drawnow();
