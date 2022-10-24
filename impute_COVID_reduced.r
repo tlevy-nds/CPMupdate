@@ -10,12 +10,7 @@ is.wholenumber <- function(x, tol = .Machine$double.eps^0.5)  abs(x - round(x)) 
 substrLeft <- function(x, n){substr(x, 1, nchar(x)-n)}
 
 # load the data
-# filename = r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\datasets\COVID_reduced_20210302a.csv)"
-# filename = r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\datasets\cvd_reduced_20210903a.csv)"
-# filename = r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\second wave\cvd_reduced_20210903a_crp.csv)"
-# filename = r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\datasets\rvent_20210302.csv)"
-# filename = r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\datasets\COVID_reduced_20211213a_crp.csv)"
-filename = r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\datasets\COVID_reduced_20220505a_all.csv)"
+filename = r"(FULLPATH\COVID_reduced_Spring_2022.csv)"
 data <- read.csv(filename, header=TRUE, sep=",")  #, colClasses=colClasses)
 
 # convert fields that end with Dtm to datetime
@@ -28,8 +23,8 @@ o2deliveryLevels <- c("room air", "nasal cannula", "mask", "nonrebreather", "nc 
 data$O2_Delivery <- factor(data$O2_Delivery, levels=o2deliveryLevels)
 
 # categorical variables need to be factors
-catVars = c("VisitStatus", "Dispo", "FacilityCode", "FinalHospital", "Gender", "Race", 
-            "Ethnicity", "Language", "CareLevelCode", "Service", "ServiceGroup", 
+catVars = c("FinalHospital", "Gender", "Race", 
+            "Ethnicity", "Language", 
             "ABO_Interpretation", "ABO_Rh_Confirmation", "ABO_RH_Interpretation")
 data <- mutate(data, across(any_of(catVars), ~factor(.x, exclude=c("NA"))))
 
@@ -46,19 +41,9 @@ labs = c("Alanine_Aminotransferase_.ALT.SGPT.", "Albumin_Serum", "Alkaline_Phosp
          "Sodium_Serum", "Troponin_I_Serum", "Troponin_T_High_Sensitivity", "Troponin_T_High_Sensitivity_Result", 
          "Troponin_T_Serum", "WBC_Count", "eGFR", "CRP")
 
-# TODO analyze AdmitDtm and create a new variable where the outcome frequency changes
-# data$MarApr <- data$AdmitDtm < as.datetime("2020-05-05T00:00:00")
-
-# create "eGFR", merge KidneyDisease, and create LoS
-
-# eGFR = if_else(data$Race == "Black", data$eGFR_if_African_American, data$eGFR_if_Non_African_American),
-# KidneyDisease = data$KidneyDisease | data$DiabeticCKD | data$HypertensiveCKD,
-
 data <- mutate(.data=data, 
                los = (data$DischargeDtm - data$AdmitDtm) / 3600,
                .keep="unused")  # .keep is experimental and isn't working for me
-# data <- data[ , -which(names(data) %in% c("eGFR_if_African_American", "eGFR_if_Non_African_American"))]
-# data <- data[ , -which(names(data) %in% c("HypertensiveCKD", "DiabeticCKD"))]
 
 # some of the lab values are text so convert all labs to double
 data <- mutate(data, across(any_of(labs), as.double))  # if_else(all(is.wholenumber, na.rm=TRUE), as.integer, as.double)
@@ -66,12 +51,11 @@ data <- mutate(data, across(any_of(labs), as.double))  # if_else(all(is.wholenum
 # create log labs
 data <- mutate(data, across(any_of(labs), ~log(replace(.x, .x == 0, min(.x[.x > 0], na.rm=TRUE))), .names="{col}_log"))
 
-# get defaults
-excludeList <- c("ClientVisitGUID", "EMPI", "AdmitDtm","DischargeDtm", "DeceasedDtm",
-                 "VisitStatus", "Dispo", "IsTransfer", "OutsideTransfer", "TransferDtm",
-                 "FacilityCode", "CareLevelCode", "Service", "ServiceGroup", "CvdResultDtm",
-                 "VentDtm", "ESIRecordedDtm", "AdmitOrderDtm", "ED_ArrivalDtm", "ComfortOnlyDtm",
-                 "DNRDtm", "BriefOpDtm")
+# list of columns not used in the imputation models
+excludeList <- c("Index", "AdmitDtm","DischargeDtm", "DeceasedDtm",
+                 "IsTransfer", "OutsideTransfer", 
+                 "VentDtm", 
+                 "DNRDtm")
 ini <- mice(data, maxit=0, print=F)
 meth <- ini$method
 pred <- ini$predictorMatrix
@@ -96,7 +80,6 @@ for(name in df$rn) {
   }
 }
 
-# TODO check this
 pred[excludeList, ] <- 0
 pred[ ,excludeList] <- 0
 
@@ -104,14 +87,11 @@ inds <- -match(excludeList, names(data))
 data2 <- data[ , inds]
 pred2 <- pred[inds, inds]
 meth2 <- meth[inds]
-ignore <- data$AdmitDtm - 5*24*3600 >= as.datetime("2020-04-23T00:00:00")
+devCutoff = as.datetime("2020-04-23T00:00:00")
+ignore <- data$AdmitDtm >= devCutoff
 
-# TODO data2 is singular, and how long should it take?
 m <- 5
 P <- ncol(data2)
-# inds <- setdiff(names(data2), "O2_Delivery")
-# inds <- which(names(data2) == "O2_Delivery")
-# inds <- 1:P
 
 # A condition number becomes small before 5 iterations, so keep trying until the imputation runs successfully.
 ct <- 0
@@ -137,9 +117,5 @@ while(ct < 5)
 
 
 for(im in 1:m) {
-  # write.table(complete(imp, im), file=paste(r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\COVID_reduced_20210302a_imp)", im, ".csv", sep=""), sep=",")
-  # write.table(complete(imp, im), file=paste(r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\COVID_reduced_20210903a_imp)", im, ".csv", sep=""), sep=",")
-  # write.table(complete(imp, im), file=paste(r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\rvent_20210302_imp)", im, ".csv", sep=""), sep=",")
-  # write.table(complete(imp, im), file=paste(r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\COVID_reduced_20211213a_imp)", im, ".csv", sep=""), sep=",")
-  write.table(complete(imp, im), file=paste(r"(C:\Users\CBEM_NDDA_L1\Documents\covid-19\COVID_reduced_20220505_imp)", im, ".csv", sep=""), sep=",")
+  write.table(complete(imp, im), file=paste(r"(FULLPATH\COVID_reduced_Spring_2022_imp_new)", im, ".csv", sep=""), sep=",")
 }

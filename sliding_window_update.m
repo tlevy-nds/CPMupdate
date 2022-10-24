@@ -54,11 +54,8 @@ saveMdl = false;  % For Lucas
 
 %% Load the data and train the initial model
 % Load dataset
-if ~exist('X', 'var') || ~exist('y2', 'var')    
-    % X already has the exclusion criteria, TODO has a single imputation
-    % load(sprintf('X%d.mat', horizon), 'Xmi', 'y2', 'predictorNames', 'admitDtm', 'finalHospital');
-    % load(sprintf('X_12132021_%d_cvguid.mat', horizon), 'Xmi', 'y2', 'predictorNames', 'admitDtm', 'cvguid', 'finalHospital');
-    load('X_05012022.mat', 'Xmi', 'outcome7', 'outcome28', 'admitDtm', 'cvguid', 'finalHospital');
+if ~exist('X', 'var') || ~exist('y2', 'var')        
+    load('X_Spring_2022.mat', 'Xmi', 'outcome7', 'outcome28', 'admitDtm', 'cvguid', 'finalHospital');
     if horizon == 7
         y2 = outcome7;
     elseif horizon == 28
@@ -385,6 +382,9 @@ for iupdateMethod = 1:length(updateMethods)
                 else
                     waitingToUpdate = true;
                     followupInd = find(admitDtm >= admitDtm(inds(end)) + days(horizon), 1, 'first');
+                    if isempty(followupInd)
+                        followupInd = length(admitDtm);
+                    end
 
                     % It shouldn't matter what I update from, right?
                     % load(mdlName, 'mdl0');

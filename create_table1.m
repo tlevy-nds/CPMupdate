@@ -12,7 +12,7 @@ p.parse(r1, interval, outcomes, horizonDays, admitBefore, varargin{:});
      p.Results.interval, p.Results.outcomes, p.Results.horizonDays, p.Results.admitBefore, p.Results.WordFileName);
 
 includeNotYetDischarged = true;
-dateshift = days(5);
+dateshift = days(0);
 
 %% Header
 myInds = [];
