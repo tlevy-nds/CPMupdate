@@ -15,7 +15,7 @@ else
 end
 
 if exist('fastDeLong', 'file') ~= 2
-    addpath('C:\Users\CBEM_NDDA_L1\Documents\covid-19\DeLongUI-master');
+    addpath('FULLPATH\DeLongUI-master');
 end
 
 uy = unique(obj.y, 'sorted');

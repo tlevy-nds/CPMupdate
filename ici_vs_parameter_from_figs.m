@@ -1,4 +1,4 @@
-basedir = 'C:\Users\CBEM_NDDA_L1\Documents\slidingwindowupdate\figs\';
+basedir = 'FULLPATH\figs\';
 % subdirs = {'redo nocos 12-13-2021 v2 7 days' 'results 12-13-2021' 'results 12-13-2021';
 %            'redo nocos 12-13-2021 v3'        'results 12-13-2021' 'results 12-13-2021'};
 % subdirs = repmat({'results ici thresh 0.03 window size 2000'}, [2 3]);
